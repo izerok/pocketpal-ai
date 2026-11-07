@@ -110,6 +110,26 @@ print(reply.choices[0].message.content)
   switch above is the control surface in this fork, and the Plus
   screen's "coming soon" label for it is stale here.
 
+## iOS IPA build (real-device testing)
+
+`.github/workflows/ios-ipa.yml` builds an **unsigned** IPA for a real
+device on `macos-26` (workflow_dispatch only, manual trigger). The steps
+are copied from the upstream CI `build-ios` job, except the SDK is
+`iphoneos` on a generic device destination instead of `iphonesimulator`,
+and the resulting `.app` is packaged as `Payload` into
+`pocketpal-local-api-<version>-unsigned.ipa`.
+
+Run it from the Actions tab ("iOS · unsigned IPA", branch
+`feat/local-api-server`). The artifact
+`pocketpal-ios-unsigned-local-api-<run number>` holds the IPA plus
+`ios-build.log` and is kept for 14 days.
+
+The IPA is unsigned and **cannot be installed as-is**: re-sign it with
+your own certificate / provisioning profile first (AltStore, SideStore,
+or Xcode with a personal certificate), then install. The bundle id is
+`ai.pocketpal`. No secrets are referenced by the workflow, and it never
+uploads to TestFlight or the App Store.
+
 ## Deliberately left for v2
 
 - Android foreground service / iOS background modes (keep-alive).
