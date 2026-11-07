@@ -69,6 +69,7 @@ import {
 } from '../__mocks__/stores/voiceModeStore';
 import {mockSearchProviderStore} from '../__mocks__/stores/searchProviderStore';
 import {mockPurchaseStore} from '../__mocks__/stores/purchaseStore';
+import {mockLocalApiServerStore} from '../__mocks__/stores/localApiServerStore';
 
 jest.mock('@react-native-clipboard/clipboard', () => mockClipboard);
 
@@ -135,6 +136,7 @@ jest.mock('../src/store', () => {
     palStore: mockPalStore,
     deepLinkStore: mockDeepLinkStore,
     serverStore: mockServerStore,
+    localApiServerStore: mockLocalApiServerStore,
     routerStore: mockRouterStore,
     ttsStore: mockTTSStore,
     asrStore: mockASRStore,

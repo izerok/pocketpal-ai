@@ -51,6 +51,12 @@ export const createStyles = (theme: Theme) =>
     divider: {
       marginVertical: 12,
     },
+    buttonRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+      marginTop: 8,
+    },
     slider: {
       //marginVertical: 8,
       //height: 40,

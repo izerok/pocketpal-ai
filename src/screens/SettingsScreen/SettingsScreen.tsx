@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 
 import {debounce} from 'lodash';
+import Clipboard from '@react-native-clipboard/clipboard';
 import {observer} from 'mobx-react-lite';
 import {toJS} from 'mobx';
 import {SafeAreaView} from 'react-native-safe-area-context';
@@ -65,6 +66,7 @@ import {
   searchProviderStore,
   purchaseStore,
   voiceModeStore,
+  localApiServerStore,
 } from '../../store';
 import {authService} from '../../services';
 import type {SearchProviderId} from '../../services/search/types';
@@ -1584,6 +1586,97 @@ export const SettingsScreen: React.FC = observer(() => {
                     disabled={!hfStore.isTokenPresent}
                     onValueChange={value => hfStore.setUseHfToken(value)}
                   />
+                </View>
+
+                {/* Local API Server (fork feature) */}
+                <Divider style={styles.divider} />
+                <View style={styles.switchContainer}>
+                  <View style={styles.textContainer}>
+                    <Text variant="titleMedium" style={styles.textLabel}>
+                      {l10n.settings.localApiServerLabel}
+                    </Text>
+                    <Text variant="labelSmall" style={styles.textDescription}>
+                      {l10n.settings.localApiServerDescription}
+                    </Text>
+                    <Text variant="labelSmall" style={styles.textDescription}>
+                      {localApiServerStore.lastError
+                        ? t(l10n.settings.localApiServerError, {
+                            error: localApiServerStore.lastError,
+                          })
+                        : localApiServerStore.running
+                          ? t(l10n.settings.localApiServerRunning, {
+                              url: localApiServerStore.baseUrl,
+                            })
+                          : l10n.settings.localApiServerStopped}
+                    </Text>
+                    <Text variant="labelSmall" style={styles.textDescription}>
+                      {t(l10n.settings.localApiServerPortLabel, {
+                        port: localApiServerStore.port.toString(),
+                      })}
+                      {' · '}
+                      {t(l10n.settings.localApiServerRequestsLabel, {
+                        total: localApiServerStore.requestsTotal.toString(),
+                        failed: localApiServerStore.requestsFailed.toString(),
+                      })}
+                    </Text>
+                  </View>
+                  <Switch
+                    testID="local-api-server-switch"
+                    value={localApiServerStore.running}
+                    onValueChange={async value => {
+                      try {
+                        if (value) {
+                          await localApiServerStore.start();
+                        } else {
+                          await localApiServerStore.stop();
+                        }
+                      } catch (error) {
+                        Alert.alert(
+                          l10n.settings.localApiServerStartErrorTitle,
+                          error instanceof Error
+                            ? error.message
+                            : String(error),
+                        );
+                      }
+                    }}
+                  />
+                </View>
+                <View style={styles.buttonRow}>
+                  <Button
+                    mode="outlined"
+                    disabled={!localApiServerStore.running}
+                    onPress={() => {
+                      Clipboard.setString(localApiServerStore.baseUrl);
+                    }}>
+                    {l10n.settings.localApiServerCopyUrl}
+                  </Button>
+                  <Button
+                    mode="outlined"
+                    disabled={!localApiServerStore.apiKey}
+                    onPress={() => {
+                      Clipboard.setString(localApiServerStore.apiKey);
+                    }}>
+                    {l10n.settings.localApiServerCopyKey}
+                  </Button>
+                  <Button
+                    mode="outlined"
+                    onPress={() => {
+                      Alert.alert(
+                        l10n.settings.localApiServerRegenerateTitle,
+                        l10n.settings.localApiServerRegenerateMessage,
+                        [
+                          {text: l10n.common.cancel, style: 'cancel'},
+                          {
+                            text: l10n.settings.localApiServerRegenerateKey,
+                            onPress: async () => {
+                              await localApiServerStore.regenerateApiKey();
+                            },
+                          },
+                        ],
+                      );
+                    }}>
+                    {l10n.settings.localApiServerRegenerateKey}
+                  </Button>
                 </View>
               </View>
             </Card.Content>

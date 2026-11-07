@@ -12,6 +12,7 @@ export default {
   getBuildNumber: jest.fn(() => deviceInfo.buildNumber),
   isEmulator: jest.fn(() => false),
   getBrand: jest.fn(() => 'Apple'),
+  getIpAddress: jest.fn(() => Promise.resolve('192.168.1.42')),
   getDevice: jest.fn(() => 'iPhone 12'),
   getDeviceId: jest.fn(() => 'test-device-id'),
   supportedAbis: jest.fn(() => ['arm64', 'arm64-v8a']),
