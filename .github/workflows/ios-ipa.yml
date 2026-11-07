@@ -1,0 +1,217 @@
+# iOS · unsigned IPA (local-api-server)
+#
+# Purpose: build the fork's iOS app for a real device, unsigned, and upload
+# it as a workflow artifact so it can be re-signed (AltStore / SideStore /
+# Xcode with a personal certificate) and installed for testing. The build
+# steps (Node, yarn, dummy Env.xcconfig / .env / GoogleService-Info.plist,
+# pod install, Xcode select, Metal toolchain, payload + Plus-gate checks)
+# are copied from the upstream CI build-ios job, except the SDK is iphoneos
+# on a generic device destination instead of iphonesimulator, and the
+# resulting .app is packaged into a Payload IPA.
+#
+# Hard boundaries (checkable before running, grep this file):
+# - No credential-store references anywhere in the steps below.
+# - No store-distribution upload tooling, no beta-distribution upload.
+# - Trigger is workflow_dispatch only (manual); it never runs on push/tag.
+# - Build job permission is contents: read only.
+# - The IPA is UNSIGNED and cannot be installed as-is; it must be re-signed
+#   with the tester's own certificate / provisioning profile first.
+# - Artifact retention is 14 days; after that, re-run the workflow.
+# - Fork-only: this file lives in izerok/pocketpal-ai, not upstream.
+#
+# To run: Actions tab -> "iOS · unsigned IPA" -> Run workflow ->
+# branch feat/local-api-server -> Run. The artifact is named
+# pocketpal-ios-unsigned-local-api-<run number>.
+
+name: iOS · unsigned IPA
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ios-ipa-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: xcodebuild (unsigned, device) + package IPA
+    runs-on: macos-26
+    timeout-minutes: 150
+    env:
+      NODE_OPTIONS: '--max-old-space-size=8192'
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.21.0'
+          cache: 'yarn'
+
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('yarn.lock', 'patches/**') }}
+
+      - name: Install Yarn
+        run: npm install -g yarn
+
+      - name: Install dependencies
+        run: yarn install
+
+      - name: Create Env.xcconfig
+        run: |
+          cat > ios/Config/Env.xcconfig << 'EOL'
+          // This file contains environment-specific build settings.
+
+          GOOGLE_WEB_CLIENT_ID = dummy-web-client-id.apps.googleusercontent.com
+          REVERSED_GOOGLE_IOS_CLIENT_ID = com.googleusercontent.apps.dummy-ios-client-id
+
+          EOL
+
+      - name: Create dummy .env file for CI
+        run: |
+          cat > .env << 'EOL'
+          FIREBASE_FUNCTIONS_URL=https://dummy-firebase-url.com
+
+          # PalsHub/Supabase Configuration
+          SUPABASE_URL=https://dummy-supabase-url.supabase.co
+          SUPABASE_ANON_KEY=dummy-anon-key-for-ci-builds
+          PALSHUB_API_BASE_URL=https://dummy-palshub-api.com
+
+          # App Configuration
+          APP_URL=pocketpal://app
+
+          # Feature Flags (true/false)
+          ENABLE_PALSHUB_INTEGRATION=true
+          ENABLE_AUTHENTICATION=true
+          ENABLE_OFFLINE_MODE=true
+
+          # Google Sign-In Configuration
+          GOOGLE_IOS_CLIENT_ID=dummy-ios-client-id.apps.googleusercontent.com
+          GOOGLE_WEB_CLIENT_ID=dummy-web-client-id.apps.googleusercontent.com
+          EOL
+
+      - name: Create dummy GoogleService-Info.plist for CI
+        run: |
+          cat > ios/GoogleService-Info.plist << 'EOL'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CLIENT_ID</key>
+            <string>dummy-client-id.apps.googleusercontent.com</string>
+            <key>REVERSED_CLIENT_ID</key>
+            <string>com.googleusercontent.apps.dummy-client-id</string>
+            <key>API_KEY</key>
+            <string>dummy-api-key-for-ci-builds</string>
+            <key>GCM_SENDER_ID</key>
+            <string>000000000000</string>
+            <key>PLIST_VERSION</key>
+            <string>1</string>
+            <key>BUNDLE_ID</key>
+            <string>ai.pocketpal</string>
+            <key>PROJECT_ID</key>
+            <string>dummy-project-for-ci</string>
+            <key>STORAGE_BUCKET</key>
+            <string>dummy-project-for-ci.appspot.com</string>
+            <key>IS_ADS_ENABLED</key>
+            <false/>
+            <key>IS_ANALYTICS_ENABLED</key>
+            <false/>
+            <key>IS_APPINVITE_ENABLED</key>
+            <false/>
+            <key>IS_GCM_ENABLED</key>
+            <true/>
+            <key>IS_SIGNIN_ENABLED</key>
+            <true/>
+            <key>GOOGLE_APP_ID</key>
+            <string>1:000000000000:ios:0000000000000000</string>
+          </dict>
+          </plist>
+          EOL
+
+      - name: Install CocoaPods dependencies
+        run: |
+          cd ios
+          pod install
+          cd ..
+
+      - name: Select default Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode.app
+          xcodebuild -version
+
+      - name: Ensure Metal toolchain
+        run: |
+          xcrun -sdk iphoneos metal -v || xcodebuild -downloadComponent MetalToolchain
+          xcrun -sdk iphonesimulator metal -v
+
+      - name: Build iOS Release for device, unsigned
+        run: |
+          cd ios
+          xcodebuild \
+            -workspace PocketPal.xcworkspace \
+            -scheme PocketPal \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM="" \
+            ONLY_ACTIVE_ARCH=NO \
+            2>&1 | tee ../ios-build.log
+          EXIT_CODE=${PIPESTATUS[0]}
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "::error::iOS device build failed (exit $EXIT_CODE)"
+            echo "::group::Error context"
+            grep -B 5 -A 20 "error:" ../ios-build.log | tail -200 || tail -100 ../ios-build.log
+            echo "::endgroup::"
+            exit $EXIT_CODE
+          fi
+
+      - name: Verify iOS payload
+        run: scripts/verify-ios-payload.sh ios/build/Build/Products/Release-iphoneos/PocketPal.app --require-marker
+
+      - name: Verify the Plus store gate
+        run: scripts/verify-plus-gate.sh ios/build/Build/Products/Release-iphoneos/PocketPal.app --ungated
+
+      - name: Package unsigned IPA
+        run: |
+          set -euo pipefail
+          APP_PATH="ios/build/Build/Products/Release-iphoneos/PocketPal.app"
+          test -d "$APP_PATH" || { echo "missing $APP_PATH" >&2; exit 1; }
+          echo "APP_PATH=$APP_PATH"
+          mkdir -p build/ipa-stage/Payload
+          cp -R "$APP_PATH" build/ipa-stage/Payload/
+          VERSION="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP_PATH/Info.plist" 2>/dev/null || echo unknown)"
+          echo "VERSION=$VERSION"
+          IPA_NAME="pocketpal-local-api-${VERSION}-unsigned.ipa"
+          echo "IPA_NAME=$IPA_NAME" >> "$GITHUB_ENV"
+          (cd build/ipa-stage && zip -qr "../$IPA_NAME" Payload)
+          ls -lh "build/$IPA_NAME"
+          unzip -l "build/$IPA_NAME" | head -20
+          # The .app must be unsigned: codesign --verify is expected to fail.
+          if codesign --verify --deep --strict "$APP_PATH" 2>/dev/null; then
+            echo "::error::expected an unsigned .app, but codesign verified it"
+            exit 1
+          fi
+          echo "confirmed: .app is unsigned, re-signing required before install"
+
+      - name: Upload IPA + build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pocketpal-ios-unsigned-local-api-${{ github.run_number }}
+          path: |
+            build/pocketpal-local-api-*-unsigned.ipa
+            ios-build.log
+          retention-days: 14
+          if-no-files-found: warn
